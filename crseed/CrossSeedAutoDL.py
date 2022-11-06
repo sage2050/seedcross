@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from .torcategory import GuessCategoryUtils
 from .tortitle import parseMovieName
 from .models import CrossTorrent, TaskControl, SearchedHistory
+from .views import numberOfTrackers
 
 logger = logging.getLogger(__name__)
 
@@ -38,81 +39,83 @@ class Searcher:
         # self.max_size_difference = process_param.max_size_difference
 
     def search(self, local_release_data, log, guess_cat=''):
-        if local_release_data['size'] is None:
-            s = 'Skipped: Could not get proper filesize data'
-            logger.info(s)
-            log.message(s)
-            return []
-
-        search_query = local_release_data['guessed_data']['title']
-        if local_release_data['guessed_data'].get('year') is not None:
-            search_query += ' ' + str(
-                local_release_data['guessed_data']['year'])
-
-        if self.process_param.jackett_prowlarr == 0:
-            search_url = self._get_jackett_search_url(search_query,
-                                                      local_release_data, guess_cat)
-        elif self.process_param.jackett_prowlarr == 1:
-            search_url = self._get_prowlarr_search_url(search_query,
-                                                       local_release_data, guess_cat)
-        else:
-            log.message('This is impossible.')
-            return []
-
-        if not search_url:
-            log.message(
-                'Skip, No indexer configured for [ {} ] category'.format(guess_cat))
-            return []
-
-        logger.info(search_url)
-
-        resp = None
-        for n in range(2):
-            try:
-                resp = requests.get(search_url, local_release_data)
-                break
-            except requests.exceptions.ReadTimeout:
-                if n == 0:
-                    s = 'ERROR: Connection timed out. Retrying once more.'
-                    print(s)
-                    log.message(s, error_abort=1)
-                    time.sleep(self.process_param.delay)
-            except requests.exceptions.ConnectionError:
-                if n == 0:
-                    s = 'ERROR: Connection failed. Retrying once more.'
-                    print(s)
-                    log.message(s, error_abort=1)
-                    time.sleep(self.process_param.delay)
-
-        if not resp:
-            s = 'ERROR: No response, check the Jackett/Prowlarr setting.'
-            log.message(s, error_abort=1)
-            return []
-        try:
-            resp_json = resp.json()
-        except json.decoder.JSONDecodeError as e:
-            print('Json decode error. Incident logged')
-            s = 'ERROR: Json decode Error. Response text: ' + resp.text
-            logger.info(s)
-            logger.exception(e)
-            log.message(s)
-            return []
-
-        if self.process_param.jackett_prowlarr == 0:
-            if resp_json['Indexers'] == []:
-                info = 'ERROR: No results found due to incorrectly input indexer names ({}). Check ' \
-                       'your spelling/capitalization. Are they added to Jackett? Exiting...'.format(
-                           self.process_param.trackers)
-                print(info)
-                logger.info(info)
-                log.message(info, error_abort=1)
+        for tracker in numberOfTrackers:
+            if local_release_data['size'] is None:
+                s = 'Skipped: Could not get proper filesize data'
+                logger.info(s)
+                log.message(s)
                 return []
-            result_json = resp_json['Results']
-        elif self.process_param.jackett_prowlarr == 1:
-            result_json = resp_json
 
-        trim_result = self.loadToIndexResult(result_json)
-        return self._get_matching_results(local_release_data, trim_result, log)
+            search_query = local_release_data['guessed_data']['title']
+            if local_release_data['guessed_data'].get('year') is not None:
+                search_query += ' ' + str(
+                    local_release_data['guessed_data']['year'])
+
+            if self.process_param.jackett_prowlarr == 0:
+                search_url = self._get_jackett_search_url(search_query,
+                                                        local_release_data, guess_cat, tracker)
+            elif self.process_param.jackett_prowlarr == 1:
+                search_url = self._get_prowlarr_search_url(search_query,
+                                                        local_release_data, guess_cat)
+            else:
+                log.message('This is impossible.')
+                return []
+
+            if not search_url:
+                log.message(
+                    'Skip, No indexer configured for [ {} ] category'.format(guess_cat))
+                return []
+
+            logger.info(search_url)
+
+            resp = None
+            for n in range(2):
+                try:
+                    resp = requests.get(search_url, local_release_data)
+                    break
+                except requests.exceptions.ReadTimeout:
+                    if n == 0:
+                        s = 'ERROR: Connection timed out. Retrying once more.'
+                        print(s)
+                        log.message(s, error_abort=1)
+                        time.sleep(self.process_param.delay)
+                except requests.exceptions.ConnectionError:
+                    if n == 0:
+                        s = 'ERROR: Connection failed. Retrying once more.'
+                        print(s)
+                        log.message(s, error_abort=1)
+                        time.sleep(self.process_param.delay)
+
+            if not resp:
+                s = 'ERROR: No response, check the Jackett/Prowlarr setting.'
+                log.message(s, error_abort=1)
+                return []
+            try:
+                resp_json = resp.json()
+            except json.decoder.JSONDecodeError as e:
+                print('Json decode error. Incident logged')
+                s = 'ERROR: Json decode Error. Response text: ' + resp.text
+                logger.info(s)
+                logger.exception(e)
+                log.message(s)
+                return []
+
+            resp_json['Indexers'] = tracker    
+            if self.process_param.jackett_prowlarr == 0:
+                if resp_json['Indexers'] == []:
+                    info = 'ERROR: No results found due to incorrectly input indexer names ({}). Check ' \
+                        'your spelling/capitalization. Are they added to Jackett? Exiting...'.format(
+                            self.process_param.trackers)
+                    print(info)
+                    logger.info(info)
+                    log.message(info, error_abort=1)
+                    return []
+                result_json = resp_json['Results']
+            elif self.process_param.jackett_prowlarr == 1:
+                result_json = resp_json
+
+                trim_result = self.loadToIndexResult(result_json)
+                return self._get_matching_results(local_release_data, trim_result, log)
 
     def _get_prowlarr_search_url(self, search_query, local_release_data, category=''):
         base_url = self.process_param.jackett_url.strip(
@@ -175,7 +178,7 @@ class Searcher:
 
     # construct final search url
 
-    def _get_jackett_search_url(self, search_query, local_release_data, category=''):
+    def _get_jackett_search_url(self, search_query, local_release_data, category='', indexer=''):
         base_url = self.process_param.jackett_url.strip(
             '/') + '/api/v2.0/indexers/all/results?'
 
@@ -220,7 +223,8 @@ class Searcher:
                 return None
         else:
             if self.process_param.trackers.strip():
-                indexerUrl = self.process_param.trackers
+                # indexerUrl = self.process_param.trackers
+                indexerUrl = numberOfTrackers[indexer]
                 optional_params['Tracker[]'] = indexerUrl
 
         for param, arg in optional_params.items():

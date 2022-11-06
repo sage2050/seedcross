@@ -64,6 +64,7 @@ def settingsView(request):
             client.password = form.cleaned_data['client_password']
             config.save()
             client.save()
+            numberOfTrackers = config.trackers.split(", ")
             startCrossSeedRoutine()
             return redirect('cs_list')
         else:
