@@ -224,7 +224,7 @@ class Searcher:
         else:
             if self.process_param.trackers.strip():
                 # indexerUrl = self.process_param.trackers
-                indexerUrl = numberOfTrackers[indexer]
+                indexerUrl = numberOfTrackers[indexer] 
                 optional_params['Tracker[]'] = indexerUrl
 
         for param, arg in optional_params.items():
